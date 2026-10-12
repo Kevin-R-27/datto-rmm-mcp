@@ -138,7 +138,7 @@ run anything are never annotated as read-only.
 | `datto_get_device_audit` | Get device audit data (full or software only) | Yes |
 | `datto_get_device_patches` | Get Windows patch installation status for a device | Yes |
 | `datto_get_site_patches` | Get Windows patch installation status across all devices in a site | Yes |
-| `datto_list_activity_logs` | List activity-log (audit) entries by time range, category, action, entity, site and user, with cursor paging. Needs the Datto "Audit: View" permission | Yes |
+| `datto_list_activity_logs` | List activity-log (audit) entries, filtered by time range, category, action, site and user (needs the Audit: View permission) | Yes |
 
 ## Docker
 
