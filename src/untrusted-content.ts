@@ -70,6 +70,8 @@ const REASONS: Record<string, string> = {
     "The hostname (and other device fields) is set on the device itself, so a compromised or malicious endpoint can name itself anything, including text designed to look like an instruction.",
   datto_find_device:
     "Hostnames are set on the device itself, so a compromised or malicious endpoint can name itself anything, including text designed to look like an instruction.",
+  datto_list_activity_logs:
+    "Hostnames and the free-form details of each entry (job names, notes, remote-session text) are set on the device or by whoever performed the action, so they can contain text crafted to look like an instruction.",
   datto_get_device_audit:
     "Installed-software names come from whatever is actually installed, including malware that names itself deceptively — this reflects what the endpoint reports about itself, not a vetted source.",
 };
@@ -113,6 +115,7 @@ export const UNTRUSTED_CONTENT_TOOLS: ReadonlySet<string> = new Set([
   "datto_list_alerts",
   "datto_get_alert",
   "datto_get_device_audit",
+  "datto_list_activity_logs",
   "datto_get_job_stdout",
   "datto_get_job_stderr",
 ]);

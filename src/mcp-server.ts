@@ -26,6 +26,13 @@ import {
 } from "@wyre-ai/node-datto-rmm";
 import { elicitSelection } from "./utils/elicitation.js";
 import {
+  ACTIVITY_LOG_MAX_PAGE,
+  buildActivityLogQuery,
+  extractNextCursor,
+  normalizeActivity,
+  type ActivityLogToolArgs,
+} from "./activity-logs.js";
+import {
   ALERT_CARD_META,
   ALERT_CARD_RESOURCE_URI,
   MCP_APP_RESOURCE_MIME,
@@ -791,6 +798,75 @@ export function createMcpServer(
             required: ["siteUid"],
           },
         },
+        {
+          name: "datto_list_activity_logs",
+          description:
+            "List Datto RMM activity-log (audit) entries: who did what, to which device or site, and when - logins, job runs, remote sessions, patch actions, device moves, setting changes. Read-only. Defaults to the last 24 hours, newest first, DEVICE entity only (pass entities [\"DEVICE\",\"USER\"] to also include user-account events such as logins). Filter by time range, category (e.g. job, patch, remote, account, device), action, site and user. Sites and users are identified by NUMERIC ids in this endpoint, not UIDs - pass siteUids and the tool resolves them. Results are paged: if `nextCursor` is returned, pass it back as `cursor` with the same filters to get the next page. Requires the API user to have the Datto \"Audit: View\" permission; without it the call fails or returns nothing.",
+          annotations: { readOnlyHint: true },
+          inputSchema: {
+            type: "object",
+            properties: {
+              from: {
+                type: "string",
+                description:
+                  "Start of the time range, ISO 8601 (e.g. 2026-10-11T00:00:00Z). Default: 24 hours before `until`.",
+              },
+              until: {
+                type: "string",
+                description: "End of the time range, ISO 8601. Default: now.",
+              },
+              categories: {
+                type: "array",
+                items: { type: "string" },
+                description:
+                  'Only these categories, e.g. ["job","patch","remote","account","device"].',
+              },
+              actions: {
+                type: "array",
+                items: { type: "string" },
+                description: 'Only these actions, e.g. ["deployment","login","create"].',
+              },
+              entities: {
+                type: "array",
+                items: { type: "string", enum: ["DEVICE", "USER"] },
+                description:
+                  'Entity types to include. Default ["DEVICE"]; use ["DEVICE","USER"] for everything.',
+              },
+              siteIds: {
+                type: "array",
+                items: { type: "number" },
+                description:
+                  "Numeric site ids (the `id` field of a site, not the UID).",
+              },
+              siteUids: {
+                type: "array",
+                items: { type: "string" },
+                description:
+                  "Site UIDs; resolved to numeric ids for you (max 20).",
+              },
+              userIds: {
+                type: "array",
+                items: { type: "number" },
+                description: "Numeric Datto user ids to restrict to.",
+              },
+              order: {
+                type: "string",
+                enum: ["asc", "desc"],
+                description: "Sort by date. Default: desc (newest first).",
+              },
+              max: {
+                type: "number",
+                description: `Entries to return in this page (default: 50, max: ${ACTIVITY_LOG_MAX_PAGE})`,
+                default: 50,
+              },
+              cursor: {
+                type: "string",
+                description:
+                  "`nextCursor` from a previous result, to fetch the next page (keep the other filters identical).",
+              },
+            },
+          },
+        },
       ],
     };
   });
@@ -1235,6 +1311,65 @@ export function createMcpServer(
           return {
             content: [
               { type: "text", text: JSON.stringify(result ?? {}, null, 2) },
+            ],
+          };
+        }
+
+        case "datto_list_activity_logs": {
+          const params = args as ActivityLogToolArgs;
+
+          // Sites are identified by numeric id in this endpoint; callers
+          // usually hold UIDs, so resolve those here.
+          const siteUids = params.siteUids ?? [];
+          if (siteUids.length > 20) {
+            throw new Error("siteUids accepts at most 20 values");
+          }
+          const resolvedSiteIds: number[] = [];
+          for (const uid of siteUids) {
+            const site = (await client.sites.get(uid)) as { id?: number } | undefined;
+            if (typeof site?.id !== "number") {
+              throw new Error(`Could not resolve a numeric id for site UID ${uid}`);
+            }
+            resolvedSiteIds.push(site.id);
+          }
+
+          const query = buildActivityLogQuery(params, resolvedSiteIds);
+          const response = await client.activityLogs.list({
+            from: query.from,
+            until: query.until,
+            entities: query.entities.join(","),
+            categories: query.categories?.join(","),
+            actions: query.actions?.join(","),
+            siteIds: query.siteIds.length ? query.siteIds : undefined,
+            userIds: query.userIds,
+            order: query.order,
+            size: query.size,
+            searchAfter: query.cursor,
+          });
+
+          const rows = (response?.activities ?? [])
+            .slice(0, query.max)
+            .map(normalizeActivity);
+          const nextCursor = extractNextCursor(response?.pageDetails?.nextPageUrl);
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    count: rows.length,
+                    from: query.from,
+                    until: query.until,
+                    order: query.order,
+                    entities: query.entities,
+                    nextCursor,
+                    activities: rows,
+                  },
+                  null,
+                  2
+                ),
+              },
             ],
           };
         }
